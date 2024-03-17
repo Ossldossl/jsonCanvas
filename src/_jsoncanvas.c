@@ -290,7 +290,9 @@ jcanvas_node* make_node(jcanvas* c, str id)
     bool ok = ensure_capacity(&c->node_cap, c->node_count+1, &c->nodes, sizeof(jcanvas_node));
     if (!ok) return NULL;
     jcanvas_node* result = &c->nodes[c->node_count++];
-    result->id = id;
+    result->id = id; result->color = (str){0};
+    // somewhat sane defaults
+    result->x = result->y = 0; result->width = result->height = 200;
     map_set(&c->id_to_nodes, id, result);
     return result;
 }
@@ -310,11 +312,81 @@ jcanvas_node* jcanvas_text_node_s(jcanvas* c, str id, str content)
     return jcanvas_text_node_s(c, id, content);
 }
 
+jcanvas_node* jcanvas_file_node_s(jcanvas* c, str id, str file_path)
+{
+    jcanvas_node* result = make_node(c, id);
+    result->type = NODE_TYPE_FILE;
+    result->as.file.path = file_path;
+    result->as.file.subpath = (str){0};
+    return result;
+}
+
+jcanvas_node* jcanvas_file_node(jcanvas* c, char* _id, char* _file_path)
+{
+    str id = make_str(_id); str file_path = make_str(_file_path);
+    return jcanvas_file_node_s(c, id, file_path);
+}
+
+jcanvas_node* jcanvas_link_node_s(jcanvas* c, str id, str link)
+{
+    jcanvas_node* result = make_node(c, id);
+    result->type = NODE_TYPE_LINK;
+    result->as.link = link;
+    return result;
+}
+
+[[always_inline]] jcanvas_node* jcanvas_link_node(jcanvas* c, char* _id, char* _link) 
+{
+    str id = make_str(_id);
+    str link = make_str(_link);
+    return jcanvas_text_node_s(c, id, link);
+}
+
+jcanvas_node* jcanvas_group_node_s(jcanvas* c, str id)
+{
+    return make_node(c, id);
+}
+
+jcanvas_node* jcanvas_group_node(jcanvas* c, char* _id)
+{
+    str id = make_str(_id);
+    return make_node(c, id);
+}
+
+void jcanvas_set_label_s(jcanvas_node* node, str label)
+{
+    if (node->type != NODE_TYPE_GROUP) { return; }
+    node->as.group_node.label = label;
+}
+
+void jcanvas_set_label(jcanvas_node* node, char* label)
+{
+    return jcanvas_set_label_s(node, make_str(label));
+}
+
+void jcanvas_set_background_image_s(jcanvas_node* group_node, str path)
+{
+    if (group_node->type != NODE_TYPE_GROUP) return;
+    group_node->as.group_node.background = path;
+}
+
+void jcanvas_set_background_image(jcanvas_node* group_node, char* _path)
+{
+    str path = make_str(_path);
+    return jcanvas_set_background_image_s(group_node, path);
+}
+
+void jcanvas_set_background_style(jcanvas_node* group_node, jcanvas_background_style style)
+{
+    if (group_node->type != NODE_TYPE_GROUP) return;
+    group_node->as.group_node.background_style = style;
+}
+
 void jcanvas_infer_edge_sides(jcanvas_edge* edge, jcanvas_node* a, jcanvas_node* b)
 {
     jcanvas_side from, to;
     // infer sides
-    if (a->x + a->width < b->x) {
+    if (a->x + a->width/2 < b->x) {
         if (a->y > b->y + b->height) { // a is below b
             from = SIDE_TOP; to = SIDE_LEFT;
         } else if (a->y + a->height <= b->y) { // a is above b
@@ -323,7 +395,7 @@ void jcanvas_infer_edge_sides(jcanvas_edge* edge, jcanvas_node* a, jcanvas_node*
             from = SIDE_RIGHT; to = SIDE_LEFT; // a and b are rougly on the same height
         }
     }
-    else if (a->x > b->x + b->width) { // if a is right of b
+    else if (a->x >= b->x + b->width/2) { // if a is right of b
         if (a->y > b->y + b->height) { // a is below b
             from = SIDE_TOP; to = SIDE_RIGHT;
         } else if (a->y + a->height <= b->y) { // a is above b
@@ -361,6 +433,7 @@ jcanvas_edge* jcanvas_connect_base(jcanvas* c, str id_from, str id_to)
     jcanvas_edge* result = &c->edges[c->edge_count++];
     result->from_node = id_from; result->to_node = id_to;
     result->id = id; result->label = (str){0};
+    result->from_end = result->to_end = 0;
     map_set(&c->id_to_edges, id, result);
     return result;
 }
@@ -442,6 +515,24 @@ void jcanvas_generate_node(str* result, jcanvas_node* node)
         case NODE_TYPE_TEXT: {
             str_append(result, "\",\"text\":\"", 10); str_append_s(result, node->as.text);
         } break;
+        case NODE_TYPE_FILE: {
+            str_append(result, "\",\"file\":\"", 10); str_append_s(result, node->as.file.path);
+            if (node->as.file.subpath.len > 0) {
+                str_append(result, "\",\"subpath\":\"", 13); str_append_s(result, node->as.file.subpath);
+            }
+        } break;
+        case NODE_TYPE_LINK: {
+            str_append(result, "\",\"link\":\"", 10); str_append_s(result, node->as.link);
+        } break;
+        case NODE_TYPE_GROUP: {
+            if (node->as.group_node.label.len > 0) {
+                str_append(result, "\",\"label\":\"", 11); str_append_s(result, node->as.group_node.label);
+            } 
+            if (node->as.group_node.background.len > 0) {
+                str_append(result, "\",\"background\":\"", 16); str_append_s(result, node->as.group_node.background);
+            }
+            str_append(result, "\",\"backgroundStyle\":\"", 21); str_append_s(result, _background_style_strings[node->as.group_node.background_style]);
+        } break;
         default: return; // not implemented yet!
     }
     char len = int_to_str(buf, node->x);
@@ -452,7 +543,7 @@ void jcanvas_generate_node(str* result, jcanvas_node* node)
     str_append(result, "\",\"width\":\"", 11); str_append(result, buf, len);
     len = int_to_str(buf, node->height);
     str_append(result, "\",\"height\":\"", 12); str_append(result, buf, len);
-    str_append(result, "\",\"color\":\"", 11); str_append_s(result, node->color);
+    if (node->color.len > 0) { str_append(result, "\",\"color\":\"", 11); str_append_s(result, node->color); }
     str_append(result, "\"}", 2);
 } 
 
@@ -465,8 +556,10 @@ void jcanvas_generate_edge(str* result, jcanvas_edge* edge)
     str_append(result, "\",\"toNode\":\"", 12); str_append_s(result, edge->to_node);
     str_append(result, "\",\"toSide\":\"", 12); str_append_s(result, _side_strings[edge->to_side]);
     str_append(result, "\",\"toEnd\":\"", 11); str_append_s(result, _end_strings[edge->to_end]);
-    str_append(result, "\",\"color\":\"", 11); str_append_s(result, edge->color);
-    str_append(result, "\",\"label\":\"", 11); str_append_s(result, edge->label);
+
+    if (edge->color.len > 0) { str_append(result, "\",\"color\":\"", 11); str_append_s(result, edge->color); }
+    if (edge->label.len > 0) { str_append(result, "\",\"label\":\"", 11); str_append_s(result, edge->label); }
+    
     str_append(result, "\"}", 2);
 }
 
@@ -484,7 +577,9 @@ str jcanvas_generate(jcanvas* c)
     for (int i = 0; i < c->edge_count; i++) {
         jcanvas_edge* edge = &c->edges[i];
         jcanvas_generate_edge(&result, edge);
+        str_append(&result, ",", 1);
     }
+    result.len-=1;
     str_append(&result, "]}\0", 3); // null terminator for printing
     return result;
 }
