@@ -35,12 +35,18 @@ static const str _end_strings[] = {
 static bool ensure_capacity(uint32_t* cap, uint32_t new_cap, void** data, uint32_t size_of_type)
 {
     if (new_cap <= *cap) return true;
-    void* result = REALLOC(*data, new_cap * size_of_type);
+
+    if (*cap == 0) *cap = new_cap;
+    else {
+        while (*cap <= new_cap) {
+            *cap *= 1.5;
+        }
+    }
+    void* result = REALLOC(*data, *cap * size_of_type);
     if (result == NULL) {
         return false;
     }
     *data = result;
-    *cap = new_cap;
     return true;
 }
 
@@ -64,6 +70,7 @@ void copy_mem(char* from, char* to, uint32_t size)
 
 bool str_append_s(str* a, str b)
 {
+    if (b.len == 0) return true;
     bool ok = ensure_capacity(&a->cap, a->len + b.len, &a->data, 1);
     if (!ok) return false;
     copy_mem(b.data, &a->data[a->len], b.len);
@@ -96,7 +103,7 @@ str str_concat(str a, str b)
     result.data = ALLOCATE(result.len+1);
     copy_mem(a.data, result.data, a.len);
     copy_mem(b.data, result.data + a.len, b.len);
-    result.data[result.len-1] = 0;
+    result.data[result.len] = 0;
     return result;
 }
 
@@ -308,25 +315,25 @@ void jcanvas_infer_edge_sides(jcanvas_edge* edge, jcanvas_node* a, jcanvas_node*
     jcanvas_side from, to;
     // infer sides
     if (a->x + a->width < b->x) {
-        if (a->y <= b->y - b->height) { // a is below b
+        if (a->y > b->y + b->height) { // a is below b
             from = SIDE_TOP; to = SIDE_LEFT;
-        } else if (a->y - a->height >= b->y) { // a is above b
+        } else if (a->y + a->height <= b->y) { // a is above b
             from = SIDE_BOTTOM; to = SIDE_LEFT;
         } else {
             from = SIDE_RIGHT; to = SIDE_LEFT; // a and b are rougly on the same height
         }
     }
     else if (a->x > b->x + b->width) { // if a is right of b
-        if (a->y <= b->y - b->height) { // a is below b
+        if (a->y > b->y + b->height) { // a is below b
             from = SIDE_TOP; to = SIDE_RIGHT;
-        } else if (a->y - a->height >= b->y) { // a is above b
+        } else if (a->y + a->height <= b->y) { // a is above b
             from = SIDE_BOTTOM; to = SIDE_RIGHT;
         } else {
             from = SIDE_LEFT; to = SIDE_RIGHT; // a and b are rougly on the same height
         }
     } 
     else { // a and b are roughly on the same x location
-        if (a->y <= b->y - b->height) { // a is below b
+        if (a->y > b->y + b->height) { // a is below b
             from = SIDE_TOP; to = SIDE_BOTTOM;
         } else if (a->y - a->height >= b->y) { // a is above b
             from = SIDE_BOTTOM; to = SIDE_TOP;
@@ -353,7 +360,7 @@ jcanvas_edge* jcanvas_connect_base(jcanvas* c, str id_from, str id_to)
 
     jcanvas_edge* result = &c->edges[c->edge_count++];
     result->from_node = id_from; result->to_node = id_to;
-    result->id = id;
+    result->id = id; result->label = (str){0};
     map_set(&c->id_to_edges, id, result);
     return result;
 }
@@ -390,11 +397,25 @@ jcanvas_edge* jcanvas_connect_by_id(jcanvas* c, str id_from, str id_to)
     node->x = x; node->y = y; node->width = width; node->height = height;
 }
 
+void reverse_buf(char* buf, uint32_t len)
+{
+    char* prev = &buf[29+len];
+    char* new = buf;
+    for (int i = 0; i < len; i++) {
+        *new++ = *prev--;
+    }
+}
+
 int int_to_str(char* buf, int64_t i)
 {
-    uint32_t index = 0;
-    if (i < 0) { 
-        buf[index++] = '-';
+    if (i == 0) { 
+        buf[0] = '0'; buf[1] = 0;
+        return 1; 
+    }
+    uint32_t index = 30;
+    bool is_negative = false;
+    if (i < 0) {
+        is_negative = true; 
         i *= -1;
     }
     while (i > 0) {
@@ -403,8 +424,13 @@ int int_to_str(char* buf, int64_t i)
         buf[index++] = digit;
         i /= 10;
     }
-    buf[index] = 0;
-    return index-1;
+    if (is_negative) {
+        buf[index++] = '-';
+    }
+    uint32_t len = index-30;
+    reverse_buf(buf, len);
+    buf[len] = 0;
+    return len;
 }
 
 char buf[50];
@@ -434,11 +460,11 @@ void jcanvas_generate_edge(str* result, jcanvas_edge* edge)
 {
     str_append(result, "{\"id\":\"", 7); str_append_s(result, edge->id);
     str_append(result, "\",\"fromNode\":\"", 14); str_append_s(result, edge->from_node);
-    str_append(result, "\",\"fromSide\":\"", 15); str_append_s(result, _side_strings[edge->from_side]);
+    str_append(result, "\",\"fromSide\":\"", 14); str_append_s(result, _side_strings[edge->from_side]);
     str_append(result, "\",\"fromEnd\":\"", 13); str_append_s(result, _end_strings[edge->from_end]);
     str_append(result, "\",\"toNode\":\"", 12); str_append_s(result, edge->to_node);
-    str_append(result, "\",\"toSide\":\"", 13); str_append_s(result, _side_strings[edge->to_side]);
-    str_append(result, "\",\"toEnd\":\"", 13); str_append_s(result, _end_strings[edge->to_end]);
+    str_append(result, "\",\"toSide\":\"", 12); str_append_s(result, _side_strings[edge->to_side]);
+    str_append(result, "\",\"toEnd\":\"", 11); str_append_s(result, _end_strings[edge->to_end]);
     str_append(result, "\",\"color\":\"", 11); str_append_s(result, edge->color);
     str_append(result, "\",\"label\":\"", 11); str_append_s(result, edge->label);
     str_append(result, "\"}", 2);
@@ -459,7 +485,7 @@ str jcanvas_generate(jcanvas* c)
         jcanvas_edge* edge = &c->edges[i];
         jcanvas_generate_edge(&result, edge);
     }
-    str_append(&result, "]}", 2);
+    str_append(&result, "]}\0", 3); // null terminator for printing
     return result;
 }
 

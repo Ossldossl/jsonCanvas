@@ -3,17 +3,19 @@
 #define JSONCANVAS_IMPLEMENTATION
 #include "jsoncanvas.h"
 
+#include <Windows.h>
+
 int main()
 {
     jcanvas canvas;
     bool ok = jcanvas_init(&canvas);
     if (!ok) { jcanvas_destroy(&canvas); return -1; }
-    
+
     // assings a UUID by default
-    jcanvas_node* a = jcanvas_text_node(&canvas, "nodea", "# Node a\nThis ```text``` is interpreted as _*markdown*_!");
-    jcanvas_pos_node(a, 0, 0, 100, 100);
-    jcanvas_node* b = jcanvas_text_node(&canvas, "nodeb", "# Node b\nNodes can be connected by calling ```jcanvas_connect``` with two nodes as a paramter");
-    jcanvas_pos_node(b, 300, 100, 100, 100);
+    jcanvas_node* a = jcanvas_text_node(&canvas, "nodea", "# Node a\\nThis ```text``` is interpreted as _*markdown*_!");
+    jcanvas_pos_node(a, 0, 0, 400, 400);
+    jcanvas_node* b = jcanvas_text_node(&canvas, "nodeb", "# Node b\\nNodes can be connected by calling ```jcanvas_connect``` with two nodes as a paramter");
+    jcanvas_pos_node(b, -600, 400, 400, 400);
 
     // automatically infers link side (e.g. left, right, top, bottom)
     jcanvas_edge* c = jcanvas_connect(&canvas, a, b);
