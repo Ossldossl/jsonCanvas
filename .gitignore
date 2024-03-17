@@ -1,3 +1,6 @@
+.vscode\*
+main.bat
+
 # Prerequisites
 *.d
 
